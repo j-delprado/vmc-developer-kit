@@ -64,8 +64,13 @@ export class DemoApiError extends Error {
   }
 }
 
+// Standalone demo-site (the public dev kit): the Express proxy serves /demo-api.
+// In-app hosting on the main VMC app overrides this to /api/abc-demo at build
+// time via VITE_DEMO_API_BASE. Default stays /demo-api so the kit works as-is.
+const DEMO_API_BASE = (import.meta as any).env?.VITE_DEMO_API_BASE || "/demo-api";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/demo-api${path}`, init);
+  const res = await fetch(`${DEMO_API_BASE}${path}`, init);
   const data: any = await res.json().catch(() => null);
   if (!res.ok) {
     throw new DemoApiError(
