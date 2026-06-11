@@ -17,6 +17,7 @@ point of Companies House registration.
 | Directory | What it is |
 |---|---|
 | [`openapi/`](openapi/) | The Partner API v1 specification (OpenAPI 3.1) |
+| [`sdk/`](sdk/) | **`@verifymyclient/sdk`** — typed, zero-dependency TypeScript client for the API |
 | [`demo-site/`](demo-site/) | **ABC ACSP** — a complete, polished demo site and the reference integration: token-holding proxy + React landing page with live verification flow. Run it locally in two terminals. |
 | [`mcp-server-v2/`](mcp-server-v2/) | MCP server — create and track verifications from Claude or any MCP-capable AI assistant |
 

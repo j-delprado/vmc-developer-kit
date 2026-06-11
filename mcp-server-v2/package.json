@@ -1,6 +1,7 @@
 {
   "name": "@verifymyclient/mcp-server",
   "version": "0.1.0",
+  "publishConfig": { "access": "public" },
   "description": "MCP server for the VerifyMyClient Partner API v1 — create and manage client identity verification invites from Claude and other MCP clients",
   "type": "module",
   "main": "dist/index.js",
