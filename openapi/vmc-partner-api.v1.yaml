@@ -1,0 +1,376 @@
+openapi: 3.1.0
+info:
+  title: VerifyMyClient Partner API
+  version: 1.0.0
+  description: |
+    Public API for accountant partners to create identity-verification
+    invitations, track their progress and pull reports.
+
+    ## How it works
+    1. You take payment from your client in your own system.
+    2. `POST /invites` — we create the invitation, deduct PAYG credits from
+       your bundle, and return the verification link.
+    3. **Your system sends the link to your client** (we do not email them
+       unless you set `send_email: true`).
+    4. Poll `GET /invites/{id}` (or watch the console) for progress.
+    5. `GET /invites/{id}/report` when completed.
+
+    ## Authentication
+    Bearer token in the `Authorization` header. Tokens are issued in the
+    VerifyMyClient console and shown once. Test tokens start with `vmc_test_`,
+    live tokens with `vmc_live_`. Test tokens only work against the test
+    environment.
+
+    ## Idempotency
+    `POST /invites` requires an `Idempotency-Key` header. Retrying with the
+    same key and body returns the original response (with
+    `Idempotency-Replayed: true`) and never double-charges credits.
+  contact:
+    name: VerifyMyClient
+    url: https://verifymyclient.com
+servers:
+  - url: https://verifymyclient.com/api/v1
+    description: Production
+  - url: https://test.verifymyclient.com/api/v1
+    description: Test / sandbox
+security:
+  - bearerAuth: []
+tags:
+  - name: Account
+  - name: Invites
+  - name: Reports
+
+paths:
+  /me:
+    get:
+      tags: [Account]
+      summary: Introspect the current token
+      operationId: getMe
+      responses:
+        '200':
+          description: Token and partner details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object: { type: string, const: partner }
+                  partner_name: { type: string }
+                  company_name: { type: [string, 'null'] }
+                  company_number: { type: [string, 'null'] }
+                  environment: { type: string, enum: [test, live] }
+                  scopes:
+                    type: array
+                    items: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /balance:
+    get:
+      tags: [Account]
+      summary: Current PAYG credit balance
+      operationId: getBalance
+      responses:
+        '200':
+          description: Credit balance
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object: { type: string, const: balance }
+                  credits_remaining: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /verification-methods:
+    get:
+      tags: [Account]
+      summary: Available verification types and document methods
+      description: |
+        Verification **types** drive credit cost (idv = 2, idv_address = 3,
+        address_only = 1). Document **methods** only control which document
+        flow the client sees; they never change the price.
+      operationId: getVerificationMethods
+      responses:
+        '200':
+          description: Types and methods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object: { type: string, const: list }
+                  verification_types:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        verification_type: { type: string, enum: [idv, idv_address, address_only] }
+                        label: { type: string }
+                        credits: { type: integer }
+                  document_methods:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        document_method: { type: string, enum: [driving_licence, passport_nfc, passport_non_nfc] }
+                        available: { type: boolean }
+                        automated: { type: boolean }
+
+  /invites:
+    post:
+      tags: [Invites]
+      summary: Create an invitation
+      operationId: createInvite
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, maxLength: 255 }
+          description: Unique key per logical request. Retries with the same key replay the original response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client, verification_type]
+              properties:
+                client:
+                  type: object
+                  required: [name]
+                  properties:
+                    name: { type: string }
+                    email:
+                      type: string
+                      format: email
+                      description: Required only when send_email is true.
+                verification_type:
+                  type: string
+                  enum: [idv, idv_address, address_only]
+                document_method:
+                  type: string
+                  enum: [driving_licence, passport_nfc, passport_non_nfc, client_choice]
+                  default: client_choice
+                  description: |
+                    Pre-select how the client verifies. driving_licence and
+                    passport_nfc are fully automated; passport_non_nfc is
+                    agent-reviewed (not yet available). client_choice lets the
+                    client pick on screen.
+                reference:
+                  type: string
+                  maxLength: 120
+                  description: Your own client/order reference, echoed back and searchable.
+                send_email:
+                  type: boolean
+                  default: false
+                  description: When true, we email the link to the client. Default is for YOUR system to send it.
+                expires_in_days:
+                  type: integer
+                  minimum: 1
+                  maximum: 90
+                  default: 30
+            examples:
+              nfc_passport:
+                value:
+                  client: { name: Jane Smith, email: jane@example.com }
+                  verification_type: idv
+                  document_method: passport_nfc
+                  reference: INV-2026-0042
+      responses:
+        '201':
+          description: Invitation created; credits deducted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Invite'
+                  - type: object
+                    properties:
+                      credits_remaining: { type: integer }
+                      email_sent: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '402':
+          description: Insufficient credits — buy a bundle in the console
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Duplicate pending invite for this client, or idempotency conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Idempotency-Key reused with a different body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [Invites]
+      summary: List invitations
+      operationId: listInvites
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, processing, completed, cancelled, expired] } }
+        - { name: reference, in: query, schema: { type: string } }
+        - { name: created_via, in: query, schema: { type: string, enum: [console, api] } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200':
+          description: Paginated invitations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object: { type: string, const: list }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Invite' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /invites/{id}:
+    get:
+      tags: [Invites]
+      summary: Get an invitation
+      operationId: getInvite
+      parameters: [{ $ref: '#/components/parameters/InviteId' }]
+      responses:
+        '200':
+          description: The invitation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invite' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Invites]
+      summary: Cancel a pending invitation (credits refunded)
+      operationId: cancelInvite
+      parameters: [{ $ref: '#/components/parameters/InviteId' }]
+      responses:
+        '200':
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  object: { type: string, const: invite }
+                  status: { type: string, const: cancelled }
+                  credits_refunded: { type: integer }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Invitation is not cancellable (already completed/processing)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /invites/{id}/report:
+    get:
+      tags: [Reports]
+      summary: Pull the verification report (JSON)
+      operationId: getInviteReport
+      parameters: [{ $ref: '#/components/parameters/InviteId' }]
+      responses:
+        '200':
+          description: Verification report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  object: { type: string, const: report }
+                  invite_status: { type: string }
+                  session_status: { type: string }
+                  verification_type: { type: string }
+                  document_method: { type: string }
+                  client:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      email: { type: [string, 'null'] }
+                  reference: { type: [string, 'null'] }
+                  identity:
+                    type: [object, 'null']
+                    properties:
+                      status: { type: string, enum: [PENDING, PASSED, FAILED] }
+                      completed_at: { type: [string, 'null'], format: date-time }
+                  address:
+                    type: [object, 'null']
+                    properties:
+                      status: { type: string, enum: [PENDING, PASSED, FAILED] }
+                      completed_at: { type: [string, 'null'], format: date-time }
+                  report_data: { type: [object, 'null'], description: Full identity verification payload }
+                  address_data: { type: [object, 'null'] }
+                  report_ready_at: { type: [string, 'null'], format: date-time }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Verification not started yet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Partner API token (vmc_test_… or vmc_live_…)
+  parameters:
+    InviteId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+      description: Invitation id (inv_…)
+  schemas:
+    Invite:
+      type: object
+      properties:
+        id: { type: string, description: 'Invitation id (inv_…)' }
+        object: { type: string, const: invite }
+        invite_url: { type: string, format: uri, description: The verification link to send to your client }
+        status: { type: string, enum: [pending, processing, completed, cancelled, expired] }
+        verification_type: { type: string, enum: [idv, idv_address, address_only] }
+        document_method: { type: string, enum: [driving_licence, passport_nfc, passport_non_nfc, client_choice] }
+        client:
+          type: object
+          properties:
+            name: { type: string }
+            email: { type: [string, 'null'] }
+        reference: { type: [string, 'null'] }
+        credits_charged: { type: integer }
+        identity_completed: { type: [boolean, 'null'] }
+        address_completed: { type: [boolean, 'null'] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: [string, 'null'], format: date-time }
+        completed_at: { type: [string, 'null'], format: date-time }
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            type: { type: string }
+            code: { type: string }
+            message: { type: string }
+  responses:
+    Unauthorized:
+      description: Missing, invalid, revoked or expired token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

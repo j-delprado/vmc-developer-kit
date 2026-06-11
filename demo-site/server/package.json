@@ -1,0 +1,17 @@
+{
+  "name": "abc-acsp-demo-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Express proxy for the ABC ACSP demo — holds the VerifyMyClient Partner API token server-side.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node --env-file=.env index.js"
+  },
+  "engines": {
+    "node": ">=20.6"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
