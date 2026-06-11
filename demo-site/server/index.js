@@ -34,6 +34,9 @@ app.use(express.json({ limit: "10kb" }));
 
 // ---------------------------------------------------------------------------
 // Per-IP rate limit: max 5 invite creations per rolling hour (in-memory).
+// NOTE: in-memory is fine for a single-process demo. In production behind a
+// load balancer / multiple instances, back this with a shared store (Redis,
+// Cloudflare rate-limiting, or your API gateway) so the limit is global.
 // ---------------------------------------------------------------------------
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;

@@ -39,6 +39,7 @@ tags:
   - name: Account
   - name: Invites
   - name: Reports
+  - name: Webhooks
 
 paths:
   /me:
@@ -210,7 +211,7 @@ paths:
       summary: List invitations
       operationId: listInvites
       parameters:
-        - { name: status, in: query, schema: { type: string, enum: [pending, processing, completed, cancelled, expired] } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, processing, completed, cancelled, expired, failed] } }
         - { name: reference, in: query, schema: { type: string } }
         - { name: created_via, in: query, schema: { type: string, enum: [console, api] } }
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
@@ -314,6 +315,82 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /webhooks:
+    get:
+      tags: [Webhooks]
+      summary: List webhook endpoints
+      description: Requires the webhooks:manage scope. Secrets are never returned.
+      operationId: listWebhooks
+      responses:
+        '200':
+          description: Your registered webhook endpoints
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object: { type: string, const: list }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/WebhookEndpoint' }
+    post:
+      tags: [Webhooks]
+      summary: Register a webhook endpoint
+      description: >
+        Returns the signing secret ONCE. Verify each delivery's
+        `X-VMC-Signature: t=<unix>,v1=<hex>` header, where
+        v1 = HMAC_SHA256(secret, `${t}.${rawRequestBody}`). Reject the delivery
+        if the timestamp is outside your tolerance window (replay protection).
+        Maximum 5 active endpoints per account.
+      operationId: createWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri, description: 'HTTPS endpoint (localhost allowed for testing).' }
+                events:
+                  type: array
+                  description: Subset of events to subscribe to. Defaults to all.
+                  items: { $ref: '#/components/schemas/WebhookEventType' }
+      responses:
+        '201':
+          description: Endpoint created — the secret is shown once
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WebhookEndpoint'
+                  - type: object
+                    properties:
+                      secret: { type: string, description: 'Signing secret (whsec_…). Shown once — store it now.' }
+        '409':
+          description: Maximum 5 active endpoints reached
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /webhooks/{id}:
+    delete:
+      tags: [Webhooks]
+      summary: Deactivate a webhook endpoint
+      operationId: deleteWebhook
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: 'Endpoint id (wh_…)' }
+      responses:
+        '200':
+          description: Deactivated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  object: { type: string, const: webhook_endpoint }
+                  is_active: { type: boolean, const: false }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -334,7 +411,7 @@ components:
         id: { type: string, description: 'Invitation id (inv_…)' }
         object: { type: string, const: invite }
         invite_url: { type: string, format: uri, description: The verification link to send to your client }
-        status: { type: string, enum: [pending, processing, completed, cancelled, expired] }
+        status: { type: string, enum: [pending, processing, completed, cancelled, expired, failed], description: 'pending → processing → completed; cancelled (refunded), expired and failed are terminal.' }
         verification_type: { type: string, enum: [idv, idv_address, address_only] }
         document_method: { type: string, enum: [driving_licence, passport_nfc, passport_non_nfc, client_choice] }
         client:
@@ -349,6 +426,7 @@ components:
         created_at: { type: string, format: date-time }
         expires_at: { type: [string, 'null'], format: date-time }
         completed_at: { type: [string, 'null'], format: date-time }
+        ch_registered_at: { type: [string, 'null'], format: date-time, description: 'When the verified identity was registered at Companies House. Asynchronous — can land hours after completed_at.' }
     Error:
       type: object
       properties:
@@ -358,6 +436,31 @@ components:
             type: { type: string }
             code: { type: string }
             message: { type: string }
+    WebhookEventType:
+      type: string
+      enum: [invite.processing, invite.completed, invite.cancelled, invite.expired, invite.failed]
+    WebhookEndpoint:
+      type: object
+      properties:
+        id: { type: string, description: 'Endpoint id (wh_…)' }
+        object: { type: string, const: webhook_endpoint }
+        url: { type: string, format: uri }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/WebhookEventType' }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+    WebhookEvent:
+      type: object
+      description: 'The JSON body POSTed to your endpoint per event. Signed via the X-VMC-Signature header.'
+      properties:
+        id: { type: string, description: 'Delivery id (evt_…)' }
+        type: { $ref: '#/components/schemas/WebhookEventType' }
+        created: { type: integer, description: 'Unix timestamp of the event.' }
+        data:
+          type: object
+          properties:
+            object: { $ref: '#/components/schemas/Invite' }
   responses:
     Unauthorized:
       description: Missing, invalid, revoked or expired token

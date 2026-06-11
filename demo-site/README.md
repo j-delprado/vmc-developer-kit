@@ -132,13 +132,39 @@ curl https://test.verifymyclient.com/api/v1/invites/inv_… \
 ```
 
 ```sh
-# Webhooks instead of polling (events: invite.processing, invite.completed,
-# invite.cancelled, invite.expired, invite.failed; HMAC-signed):
+# Webhooks instead of polling. Register an endpoint — the signing secret is
+# returned ONCE (events: invite.processing/completed/cancelled/expired/failed):
 curl -X POST https://test.verifymyclient.com/api/v1/webhooks \
   -H "Authorization: Bearer $VMC_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{ "url": "https://your-system.example/vmc-webhook" }'
+# → { "id": "wh_…", "url": "…", "events": [...], "secret": "whsec_…", "is_active": true }
 ```
+
+Each delivery is an HTTP POST with this body and an `X-VMC-Signature` header:
+
+```jsonc
+// POST body
+{ "id": "evt_…", "type": "invite.completed", "created": 1781200000,
+  "data": { "object": { /* the full Invite, incl. status + ch_registered_at */ } } }
+// Header
+//   X-VMC-Signature: t=1781200000,v1=<hex>
+```
+
+Verify it before trusting the payload (Node):
+
+```js
+import crypto from 'node:crypto';
+function verify(rawBody, header, secret, toleranceSec = 300) {
+  const parts = Object.fromEntries(header.split(',').map(kv => kv.split('=')));
+  const expected = crypto.createHmac('sha256', secret).update(`${parts.t}.${rawBody}`).digest('hex');
+  const ok = crypto.timingSafeEqual(Buffer.from(parts.v1), Buffer.from(expected));
+  const fresh = Math.abs(Date.now() / 1000 - Number(parts.t)) < toleranceSec; // replay guard
+  return ok && fresh;
+}
+```
+
+**Retries:** a non-2xx (or no) response is retried with backoff `1m → 5m → 30m → 2h → 8h`, then the delivery is marked dead. Endpoints are idempotent on `evt_…` — dedupe on it. Up to 5 active endpoints per account.
 
 **3. Pull the report** once completed:
 
