@@ -22,7 +22,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/j-delprado/vmc-developer-kit.git",
+    "url": "https://github.com/VerifyMyClient/vmc-developer-kit.git",
     "directory": "sdk"
   },
   "keywords": ["verifymyclient", "identity-verification", "companies-house", "acsp", "kyc", "idv"],
