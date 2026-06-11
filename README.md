@@ -10,6 +10,8 @@ brand: you create an invite, your client verifies on their phone in minutes
 (UK/EU driving licence or biometric passport), and you track everything to the
 point of Companies House registration.
 
+📘 **Full documentation, pricing and sign-up → [verifymyclient.com/partner-api](https://verifymyclient.com/partner-api/)**
+
 ## What's in this kit
 
 | Directory | What it is |
@@ -57,7 +59,7 @@ Partner accounts are pay-as-you-go: buy a credit bundle, consume it through
 the API or the console, top up when you need to. Hosted white-label landing
 pages and on-page payment collection (Stripe Connect) are on the roadmap.
 
-→ [verifymyclient.com](https://verifymyclient.com)
+→ [verifymyclient.com/partner-api](https://verifymyclient.com/partner-api/)
 
 ## About this repository
 
